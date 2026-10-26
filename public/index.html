@@ -12,7 +12,7 @@
 <body>
 <canvas id="c" aria-label="A school of pixel fish that follows the cursor"></canvas>
 <script>
-const PX = 4; // screen pixels per art pixel
+const PX = 6; // screen pixels per art pixel
 const c = document.getElementById('c'), g = c.getContext('2d');
 let W, H, fish = [];
 const mouse = { x: -1e4, y: -1e4, active: false };
@@ -20,7 +20,7 @@ const mouse = { x: -1e4, y: -1e4, active: false };
 function resize() {
   W = c.width = Math.ceil(innerWidth / PX);
   H = c.height = Math.ceil(innerHeight / PX);
-  const n = Math.min(600, Math.round(W * H / 120));
+  const n = Math.min(600, Math.round(W * H / 180));
   while (fish.length < n) fish.push(spawn());
   fish.length = n;
 }
@@ -45,21 +45,21 @@ function step() {
       const dx = o.x - f.x, dy = o.y - f.y, d2 = dx * dx + dy * dy;
       if (d2 > 144) continue;
       n++; ax += o.vx; ay += o.vy; cx += dx; cy += dy;
-      if (d2 < 9) { sx -= dx / (d2 + 0.1); sy -= dy / (d2 + 0.1); }
+      if (d2 < 16) { sx -= dx / (d2 + 0.1); sy -= dy / (d2 + 0.1); }
     }
     if (n) {
       f.vx += (ax / n - f.vx) * 0.05 + cx / n * 0.004;
       f.vy += (ay / n - f.vy) * 0.05 + cy / n * 0.004;
     }
-    f.vx += sx * 0.15; f.vy += sy * 0.15;
+    f.vx += sx * 0.06; f.vy += sy * 0.06;
 
     if (mouse.active) {
       const dx = mouse.x - f.x, dy = mouse.y - f.y, d = Math.hypot(dx, dy) + 0.01;
-      if (d < 14) { f.vx -= dx / d * 0.6; f.vy -= dy / d * 0.6; } // scatter near the cursor
-      else { f.vx += dx / d * 0.04; f.vy += dy / d * 0.04; }     // otherwise follow it
+      if (d < 14) { f.vx -= dx / d * 0.25; f.vy -= dy / d * 0.25; } // scatter near the cursor
+      else { f.vx += dx / d * 0.015; f.vy += dy / d * 0.015; }     // otherwise follow it
     }
 
-    const s = Math.hypot(f.vx, f.vy), max = mouse.active ? 1.6 : 0.9, min = 0.35;
+    const s = Math.hypot(f.vx, f.vy), max = mouse.active ? 0.6 : 0.3, min = 0.12;
     const k = s > max ? max / s : s < min ? min / s : 1;
     f.vx *= k; f.vy *= k;
     f.x = (f.x + f.vx + W) % W;
@@ -68,8 +68,7 @@ function step() {
 }
 
 function draw(t) {
-  g.fillStyle = 'rgba(0,0,0,0.55)'; // short trails
-  g.fillRect(0, 0, W, H);
+  g.clearRect(0, 0, W, H);
   for (const f of fish) {
     const s = Math.hypot(f.vx, f.vy), dx = f.vx / s, dy = f.vy / s;
     // light catches the flank as the fish turns
