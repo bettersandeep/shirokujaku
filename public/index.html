@@ -5,141 +5,128 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>shirokujaku</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
   canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
 </style>
 </head>
 <body>
-<canvas id="c" aria-label="A school of pixel sardines that follows the cursor"></canvas>
+<canvas id="c" aria-label="A dithered night sea with a lighthouse; the moon follows the cursor"></canvas>
 <script>
-const L = 48; // sprite length in art pixels, one art pixel per css pixel
-const c = document.getElementById('c'), g = c.getContext('2d');
-let W, H, dpr, fish = [];
-const mouse = { x: 0, y: 0, active: false };
+const FS = `
+precision highp float;
+uniform vec2 R;     // canvas size in device pixels
+uniform float T;    // seconds
+uniform vec2 M;     // moon position, 0..1 with y up
+uniform float DOT;  // device pixels per dither dot
 
-// colour stops from back (v=-1) to belly (v=1): [v, hue, sat, light]
-const STOPS = [[-1, 215, 55, 18], [-0.55, 210, 55, 34], [-0.2, 205, 35, 56], [0.05, 205, 14, 78], [0.5, 200, 8, 87], [1, 205, 10, 68]];
-
-function shade(v) {
-  for (let i = 1; i < STOPS.length; i++) {
-    const [v1, ...c1] = STOPS[i], [v0, ...c0] = STOPS[i - 1];
-    if (v <= v1) { const k = (v - v0) / (v1 - v0); return c0.map((x, j) => x + (c1[j] - x) * k); }
-  }
-  return STOPS.at(-1).slice(1);
+float hash(vec2 p) { vec3 q = fract(p.xyx * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + 1.0), f.x), f.y);
 }
-
-// sardine sprite facing right, built from a fusiform body profile
-function sardine() {
-  const D = 0.115 * L, finH = 0.45 * D, a = 0.9, b = 0.55;
-  const SH = Math.ceil(2 * (D + finH)) + 2, cy = SH / 2;
-  const m = a / (a + b), norm = 1 / (m ** a * (1 - m) ** b);
-  const half = t => D * (norm * t ** a * (1 - t) ** b + 0.15 * (1 - t) ** 6);
-  const s = document.createElement('canvas');
-  s.width = L; s.height = SH;
-  const sg = s.getContext('2d');
-  const eyeU = 0.2 + 0.8 * 0.88, eyeY = -0.22 * half(0.88), eyeR = Math.max(1, D * 0.24);
-
-  for (let px = 0; px < L; px++) for (let py = 0; py < SH; py++) {
-    const u = (px + 0.5) / L, y = py + 0.5 - cy, t = (u - 0.2) / 0.8;
-    let col = null;
-    if (t > 0 && t < 1 && Math.abs(y) < half(t)) {
-      const v = y / half(t);
-      let [hu, sa, l] = shade(v);
-      l -= (1 - t) * 6; // a little darker toward the tail
-      if (Math.abs(v + 0.12) * half(t) < 0.5 && t < 0.78) l -= 10; // lateral line
-      if (v > -0.4 && v < -0.15 && t > 0.4 && t < 0.75 && px % 4 === 0) l -= 25; // spots
-      if (Math.abs(u - (0.2 + 0.8 * 0.78) + 0.04 * v * v) * L < 0.6 && Math.abs(v) < 0.8) l -= 14; // gill
-      const ed = Math.hypot(px + 0.5 - eyeU * L, y - eyeY);
-      if (ed < eyeR) { sa = 20; l = ed < eyeR * 0.6 ? 6 : 70; }
-      col = [hu, sa, Math.round(l / 5) * 5]; // band the light into pixel-art steps
-    } else if (u < 0.22) { // forked tail
-      const q = u / 0.22, outer = D * (0.15 + 0.8 * (1 - q) ** 0.9), inner = D * 0.75 * Math.max(0, 1 - q / 0.55) ** 1.2;
-      if (Math.abs(y) <= outer && Math.abs(y) >= inner) col = [212, 35, Math.abs(y) > outer - 1 ? 30 : 45];
-    } else if (t > 0.42 && t < 0.6 && y < 0) { // dorsal fin
-      const q = (t - 0.42) / 0.18;
-      if (-y < half(t) + finH * Math.min(q / 0.25, 1) * (1 - q)) col = [212, 40, 32];
-    } else if (t > 0.22 && t < 0.36 && y > 0) { // anal fin
-      const q = (t - 0.22) / 0.14;
-      if (y < half(t) + finH * 0.5 * Math.min(q / 0.3, 1) * (1 - q)) col = [208, 20, 55];
-    }
-    if (col) { sg.fillStyle = `hsl(${col[0]},${col[1]}%,${col[2]}%)`; sg.fillRect(px, py, 1, 1); }
-  }
-  sg.fillStyle = '#fff'; // eye glint
-  sg.fillRect(Math.floor(eyeU * L + eyeR * 0.3), Math.floor(cy + eyeY - eyeR * 0.3), 1, 1);
-  return s;
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; }
+  return v;
 }
-const SPRITE = sardine();
+// 8x8 ordered (Bayer) threshold built from three 2x2 levels
+float bayer2(vec2 a) { a = floor(a); return fract(dot(a, vec2(0.5, a.y * 0.75))); }
+float bayer8(vec2 a) { return bayer2(0.25 * a) * 0.0625 + bayer2(0.5 * a) * 0.25 + bayer2(a); }
+
+void main() {
+  vec2 px = floor(gl_FragCoord.xy / DOT);
+  vec2 uv = px * DOT / R;
+  float aspect = R.x / R.y, hz = 0.46, g;
+  vec2 moon = vec2(M.x, max(M.y, hz + 0.12));
+
+  // headland and lighthouse on the left
+  float land = hz + 0.1 * smoothstep(0.34, 0.04, uv.x) + 0.025 * fbm(vec2(uv.x * 14.0, 3.0)) - 0.012;
+  vec2 lamp = vec2(0.14, hz + 0.1 * smoothstep(0.34, 0.04, 0.14) + 0.012 + 0.13);
+  float towerY = (uv.y - lamp.y + 0.13) / 0.13; // 0 at base, 1 at lamp
+  bool tower = towerY > -0.2 && towerY < 1.0 && abs(uv.x - lamp.x) * aspect < mix(0.011, 0.006, towerY);
+  bool solid = (uv.x < 0.36 && uv.y < land && uv.y > hz - 0.012) || tower;
+
+  if (uv.y > hz) {
+    vec2 d = (uv - moon) * vec2(aspect, 1.0);
+    float r = length(d);
+    float disc = smoothstep(0.036, 0.032, r) * (0.75 + 0.3 * fbm(d * 40.0 + 4.0));
+    float glow = 0.5 * exp(-r * 7.0);
+    float sky = 0.03 + 0.24 * pow(1.0 - (uv.y - hz) / (1.0 - hz), 3.0); // horizon haze backlights the land
+    vec2 cp = vec2(uv.x * aspect * 2.2 + T * 0.02, uv.y * 8.0);
+    float cd = fbm(cp + 0.9 * fbm(cp * 1.7 - T * 0.02)); // warped, drifting cloud field
+    float cl = smoothstep(0.5, 0.62, cd);
+    float rim = smoothstep(0.47, 0.53, cd) * (1.0 - smoothstep(0.55, 0.66, cd));
+    float rays = d.y < 0.0 ? pow(noise(vec2(atan(d.x, -d.y) * 9.0, T * 0.08)), 3.0) * exp(-r * 2.5) * 0.22 : 0.0;
+    float stars = step(0.9965, hash(px)) * (1.0 - cl) * smoothstep(0.15, 0.5, r);
+    g = sky + glow + stars + rays * (1.0 - cl);
+    g = mix(g, 0.015 + glow * (0.12 + 2.6 * rim), cl); // dark clouds with moonlit rims
+    g = max(g, disc * (1.0 - cl * 0.85));
+  } else {
+    float dy = hz - uv.y;
+    float z = 0.25 / (dy + 0.003);
+    vec2 w = vec2((uv.x - 0.5) * aspect * z, z);
+    float h = fbm(w * vec2(1.5, 6.0) + vec2(T * 0.05, -T * 0.3)) * 0.6
+            + fbm(w * vec2(5.0, 20.0) + vec2(-T * 0.04, -T * 0.6)) * 0.4;
+    float path = exp(-pow((uv.x - moon.x) * aspect / (0.02 + 0.35 * dy), 2.0));
+    g = 0.02 + 0.07 * h + path * smoothstep(0.5, 0.74, h) * 1.15 + path * 0.05 + 0.12 * exp(-dy * 60.0);
+  }
+
+  // sweeping lighthouse beam; the lamp flares when it faces us
+  float th = T * 0.7, cs = cos(th);
+  vec2 v = (uv - lamp) * vec2(aspect, 1.0);
+  float along = v.x * sign(cs), perp = abs(v.y);
+  float beam = along > 0.0 ? exp(-perp / (0.003 + along * 0.06)) * (1.0 - smoothstep(0.0, abs(cs) * 1.4 + 0.01, along)) * 0.7 : 0.0;
+  float flare = exp(-length(v) * 60.0) * (0.5 + 1.5 * pow(abs(sin(th)), 12.0));
+  if (solid) g = 0.0;
+  g += beam + flare;
+
+  // ragged edges that dissolve into the page
+  vec2 e = min(uv, 1.0 - uv);
+  g *= smoothstep(0.0, 0.05 + hash(px * 0.5) * 0.08, min(e.x, e.y));
+
+  // bright areas shimmer: jitter the threshold over time
+  float jitter = (noise(px * 0.15 + T * 1.3) - 0.5) * 0.15 + 0.07 * sin(T * 2.0 + hash(px * 0.2) * 6.28);
+  float ink = step(clamp(bayer8(px) + 0.1 + jitter * smoothstep(0.05, 0.3, g), 0.001, 0.999), g);
+  gl_FragColor = vec4(mix(vec3(0.067), vec3(0.91, 0.835, 0.718), ink), 1.0);
+}`;
+
+const c = document.getElementById('c');
+const gl = c.getContext('webgl');
+const prog = gl.createProgram();
+for (const [type, src] of [[gl.VERTEX_SHADER, 'attribute vec2 p; void main() { gl_Position = vec4(p, 0, 1); }'], [gl.FRAGMENT_SHADER, FS]]) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  gl.attachShader(prog, s);
+}
+gl.linkProgram(prog); gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const U = n => gl.getUniformLocation(prog, n);
+
+const moon = { x: 0.62, y: 0.78 }, target = { ...moon };
+addEventListener('pointermove', e => { target.x = e.clientX / innerWidth; target.y = 1 - e.clientY / innerHeight; });
 
 function resize() {
-  dpr = devicePixelRatio || 1;
-  W = innerWidth; H = innerHeight;
-  c.width = W * dpr; c.height = H * dpr;
-  const n = Math.min(400, Math.round(W * H / 4500));
-  while (fish.length < n) fish.push(spawn());
-  fish.length = n;
+  const dpr = devicePixelRatio || 1;
+  c.width = innerWidth * dpr; c.height = innerHeight * dpr;
+  gl.viewport(0, 0, c.width, c.height);
+  gl.uniform2f(U('R'), c.width, c.height);
+  gl.uniform1f(U('DOT'), dpr); // one dither dot per css pixel
 }
-
-function spawn() {
-  const a = Math.random() * Math.PI * 2;
-  return { x: Math.random() * W, y: Math.random() * H, vx: Math.cos(a), vy: Math.sin(a), a };
-}
-
-function step() {
-  // ponytail: O(n^2) neighbour scan, fine up to ~400 fish; add a spatial grid if the count grows
-  for (const f of fish) {
-    let ax = 0, ay = 0, cx = 0, cy = 0, sx = 0, sy = 0, n = 0;
-    for (const o of fish) {
-      if (o === f) continue;
-      const dx = o.x - f.x, dy = o.y - f.y, d2 = dx * dx + dy * dy;
-      if (d2 > 14400) continue;
-      n++; ax += o.vx; ay += o.vy; cx += dx; cy += dy;
-      if (d2 < 1600) { sx -= dx / d2; sy -= dy / d2; }
-    }
-    if (n) {
-      f.vx += (ax / n - f.vx) * 0.08 + cx / n * 0.0004;
-      f.vy += (ay / n - f.vy) * 0.08 + cy / n * 0.0004;
-    }
-    f.vx += sx * 3; f.vy += sy * 3;
-
-    if (mouse.active) {
-      const dx = mouse.x - f.x, dy = mouse.y - f.y, d = Math.hypot(dx, dy) + 0.01;
-      if (d < 90) { f.vx -= dx / d * 0.35; f.vy -= dy / d * 0.35; } // scatter near the cursor
-      else { f.vx += dx / d * 0.03; f.vy += dy / d * 0.03; }     // otherwise follow it
-    }
-
-    const s = Math.hypot(f.vx, f.vy), max = mouse.active ? 2.2 : 1.1, min = 0.5;
-    const k = s > max ? max / s : s < min ? min / s : 1;
-    f.vx *= k; f.vy *= k;
-    const m = L; // wrap off-screen so fish never pop in or out
-    f.x = (f.x + f.vx + m + W + 2 * m) % (W + 2 * m) - m;
-    f.y = (f.y + f.vy + m + H + 2 * m) % (H + 2 * m) - m;
-    // turn the body smoothly toward the heading
-    let da = Math.atan2(f.vy, f.vx) - f.a;
-    da = Math.atan2(Math.sin(da), Math.cos(da));
-    f.a += da * 0.15;
-  }
-}
-
-function draw() {
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  g.clearRect(0, 0, c.width, c.height);
-  g.imageSmoothingEnabled = false;
-  for (const f of fish) {
-    g.setTransform(dpr, 0, 0, dpr, f.x * dpr, f.y * dpr);
-    g.rotate(f.a);
-    if (Math.cos(f.a) < 0) g.scale(1, -1); // keep the back up when swimming left
-    g.drawImage(SPRITE, -L / 2, -SPRITE.height / 2);
-  }
-}
-
-function setMouse(e) { mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true; }
-addEventListener('pointermove', setMouse);
-addEventListener('pointerdown', setMouse);
-document.addEventListener('mouseleave', () => mouse.active = false);
 addEventListener('resize', resize);
-
 resize();
-(function loop() { step(); draw(); requestAnimationFrame(loop); })();
+
+(function loop(t) {
+  moon.x += (target.x - moon.x) * 0.05;
+  moon.y += (target.y - moon.y) * 0.05;
+  gl.uniform1f(U('T'), t / 1000);
+  gl.uniform2f(U('M'), moon.x, moon.y);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(loop);
+})(0);
 </script>
 </body>
 </html>

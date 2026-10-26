@@ -1,6 +1,6 @@
 # shirokujaku
 
-A pixel-art school of fish that follows your cursor.
+A dithered night sea with a lighthouse. The moon follows your cursor.
 
 Static page in `public/`, served by a Cloudflare Worker.
 
