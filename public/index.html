@@ -6,91 +6,140 @@
 <title>shirokujaku</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: crosshair; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
 </style>
 </head>
 <body>
-<canvas id="c" aria-label="A school of pixel fish that follows the cursor"></canvas>
+<canvas id="c" aria-label="A school of pixel sardines that follows the cursor"></canvas>
 <script>
-const PX = 6; // screen pixels per art pixel
+const L = 48; // sprite length in art pixels, one art pixel per css pixel
 const c = document.getElementById('c'), g = c.getContext('2d');
-let W, H, fish = [];
-const mouse = { x: -1e4, y: -1e4, active: false };
+let W, H, dpr, fish = [];
+const mouse = { x: 0, y: 0, active: false };
+
+// colour stops from back (v=-1) to belly (v=1): [v, hue, sat, light]
+const STOPS = [[-1, 215, 55, 18], [-0.55, 210, 55, 34], [-0.2, 205, 35, 56], [0.05, 205, 14, 78], [0.5, 200, 8, 87], [1, 205, 10, 68]];
+
+function shade(v) {
+  for (let i = 1; i < STOPS.length; i++) {
+    const [v1, ...c1] = STOPS[i], [v0, ...c0] = STOPS[i - 1];
+    if (v <= v1) { const k = (v - v0) / (v1 - v0); return c0.map((x, j) => x + (c1[j] - x) * k); }
+  }
+  return STOPS.at(-1).slice(1);
+}
+
+// sardine sprite facing right, built from a fusiform body profile
+function sardine() {
+  const D = 0.115 * L, finH = 0.45 * D, a = 0.9, b = 0.55;
+  const SH = Math.ceil(2 * (D + finH)) + 2, cy = SH / 2;
+  const m = a / (a + b), norm = 1 / (m ** a * (1 - m) ** b);
+  const half = t => D * (norm * t ** a * (1 - t) ** b + 0.15 * (1 - t) ** 6);
+  const s = document.createElement('canvas');
+  s.width = L; s.height = SH;
+  const sg = s.getContext('2d');
+  const eyeU = 0.2 + 0.8 * 0.88, eyeY = -0.22 * half(0.88), eyeR = Math.max(1, D * 0.24);
+
+  for (let px = 0; px < L; px++) for (let py = 0; py < SH; py++) {
+    const u = (px + 0.5) / L, y = py + 0.5 - cy, t = (u - 0.2) / 0.8;
+    let col = null;
+    if (t > 0 && t < 1 && Math.abs(y) < half(t)) {
+      const v = y / half(t);
+      let [hu, sa, l] = shade(v);
+      l -= (1 - t) * 6; // a little darker toward the tail
+      if (Math.abs(v + 0.12) * half(t) < 0.5 && t < 0.78) l -= 10; // lateral line
+      if (v > -0.4 && v < -0.15 && t > 0.4 && t < 0.75 && px % 4 === 0) l -= 25; // spots
+      if (Math.abs(u - (0.2 + 0.8 * 0.78) + 0.04 * v * v) * L < 0.6 && Math.abs(v) < 0.8) l -= 14; // gill
+      const ed = Math.hypot(px + 0.5 - eyeU * L, y - eyeY);
+      if (ed < eyeR) { sa = 20; l = ed < eyeR * 0.6 ? 6 : 70; }
+      col = [hu, sa, Math.round(l / 5) * 5]; // band the light into pixel-art steps
+    } else if (u < 0.22) { // forked tail
+      const q = u / 0.22, outer = D * (0.15 + 0.8 * (1 - q) ** 0.9), inner = D * 0.75 * Math.max(0, 1 - q / 0.55) ** 1.2;
+      if (Math.abs(y) <= outer && Math.abs(y) >= inner) col = [212, 35, Math.abs(y) > outer - 1 ? 30 : 45];
+    } else if (t > 0.42 && t < 0.6 && y < 0) { // dorsal fin
+      const q = (t - 0.42) / 0.18;
+      if (-y < half(t) + finH * Math.min(q / 0.25, 1) * (1 - q)) col = [212, 40, 32];
+    } else if (t > 0.22 && t < 0.36 && y > 0) { // anal fin
+      const q = (t - 0.22) / 0.14;
+      if (y < half(t) + finH * 0.5 * Math.min(q / 0.3, 1) * (1 - q)) col = [208, 20, 55];
+    }
+    if (col) { sg.fillStyle = `hsl(${col[0]},${col[1]}%,${col[2]}%)`; sg.fillRect(px, py, 1, 1); }
+  }
+  sg.fillStyle = '#fff'; // eye glint
+  sg.fillRect(Math.floor(eyeU * L + eyeR * 0.3), Math.floor(cy + eyeY - eyeR * 0.3), 1, 1);
+  return s;
+}
+const SPRITE = sardine();
 
 function resize() {
-  W = c.width = Math.ceil(innerWidth / PX);
-  H = c.height = Math.ceil(innerHeight / PX);
-  const n = Math.min(600, Math.round(W * H / 180));
+  dpr = devicePixelRatio || 1;
+  W = innerWidth; H = innerHeight;
+  c.width = W * dpr; c.height = H * dpr;
+  const n = Math.min(400, Math.round(W * H / 4500));
   while (fish.length < n) fish.push(spawn());
   fish.length = n;
 }
 
 function spawn() {
   const a = Math.random() * Math.PI * 2;
-  return {
-    x: Math.random() * W, y: Math.random() * H,
-    vx: Math.cos(a), vy: Math.sin(a),
-    hue: 195 + Math.random() * 30,
-    sat: Math.random() < 0.4 ? 8 + Math.random() * 12 : 45 + Math.random() * 35, // silver or blue
-    len: 3 + (Math.random() * 3 | 0),
-  };
+  return { x: Math.random() * W, y: Math.random() * H, vx: Math.cos(a), vy: Math.sin(a), a };
 }
 
 function step() {
-  // ponytail: O(n^2) neighbour scan, fine up to ~600 fish; add a spatial grid if the count grows
+  // ponytail: O(n^2) neighbour scan, fine up to ~400 fish; add a spatial grid if the count grows
   for (const f of fish) {
     let ax = 0, ay = 0, cx = 0, cy = 0, sx = 0, sy = 0, n = 0;
     for (const o of fish) {
       if (o === f) continue;
       const dx = o.x - f.x, dy = o.y - f.y, d2 = dx * dx + dy * dy;
-      if (d2 > 144) continue;
+      if (d2 > 14400) continue;
       n++; ax += o.vx; ay += o.vy; cx += dx; cy += dy;
-      if (d2 < 16) { sx -= dx / (d2 + 0.1); sy -= dy / (d2 + 0.1); }
+      if (d2 < 1600) { sx -= dx / d2; sy -= dy / d2; }
     }
     if (n) {
-      f.vx += (ax / n - f.vx) * 0.05 + cx / n * 0.004;
-      f.vy += (ay / n - f.vy) * 0.05 + cy / n * 0.004;
+      f.vx += (ax / n - f.vx) * 0.08 + cx / n * 0.0004;
+      f.vy += (ay / n - f.vy) * 0.08 + cy / n * 0.0004;
     }
-    f.vx += sx * 0.06; f.vy += sy * 0.06;
+    f.vx += sx * 3; f.vy += sy * 3;
 
     if (mouse.active) {
       const dx = mouse.x - f.x, dy = mouse.y - f.y, d = Math.hypot(dx, dy) + 0.01;
-      if (d < 14) { f.vx -= dx / d * 0.25; f.vy -= dy / d * 0.25; } // scatter near the cursor
-      else { f.vx += dx / d * 0.015; f.vy += dy / d * 0.015; }     // otherwise follow it
+      if (d < 90) { f.vx -= dx / d * 0.35; f.vy -= dy / d * 0.35; } // scatter near the cursor
+      else { f.vx += dx / d * 0.03; f.vy += dy / d * 0.03; }     // otherwise follow it
     }
 
-    const s = Math.hypot(f.vx, f.vy), max = mouse.active ? 0.6 : 0.3, min = 0.12;
+    const s = Math.hypot(f.vx, f.vy), max = mouse.active ? 2.2 : 1.1, min = 0.5;
     const k = s > max ? max / s : s < min ? min / s : 1;
     f.vx *= k; f.vy *= k;
-    f.x = (f.x + f.vx + W) % W;
-    f.y = (f.y + f.vy + H) % H;
+    const m = L; // wrap off-screen so fish never pop in or out
+    f.x = (f.x + f.vx + m + W + 2 * m) % (W + 2 * m) - m;
+    f.y = (f.y + f.vy + m + H + 2 * m) % (H + 2 * m) - m;
+    // turn the body smoothly toward the heading
+    let da = Math.atan2(f.vy, f.vx) - f.a;
+    da = Math.atan2(Math.sin(da), Math.cos(da));
+    f.a += da * 0.15;
   }
 }
 
-function draw(t) {
-  g.clearRect(0, 0, W, H);
+function draw() {
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, c.width, c.height);
+  g.imageSmoothingEnabled = false;
   for (const f of fish) {
-    const s = Math.hypot(f.vx, f.vy), dx = f.vx / s, dy = f.vy / s;
-    // light catches the flank as the fish turns
-    const flash = 0.5 + 0.5 * Math.sin(Math.atan2(dy, dx) * 2 + t * 0.001);
-    for (let i = 0; i < f.len; i++) {
-      const l = 40 + flash * 45 - i * 6;
-      g.fillStyle = `hsl(${f.hue},${f.sat}%,${l}%)`;
-      g.fillRect(Math.round(f.x - dx * i), Math.round(f.y - dy * i), 1, 1);
-      if (i === 1 && f.len > 3) g.fillRect(Math.round(f.x - dx * i - dy), Math.round(f.y - dy * i + dx), 1, 1);
-    }
+    g.setTransform(dpr, 0, 0, dpr, f.x * dpr, f.y * dpr);
+    g.rotate(f.a);
+    if (Math.cos(f.a) < 0) g.scale(1, -1); // keep the back up when swimming left
+    g.drawImage(SPRITE, -L / 2, -SPRITE.height / 2);
   }
 }
 
-function setMouse(e) { mouse.x = e.clientX / PX; mouse.y = e.clientY / PX; mouse.active = true; }
+function setMouse(e) { mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true; }
 addEventListener('pointermove', setMouse);
 addEventListener('pointerdown', setMouse);
-addEventListener('pointerleave', () => mouse.active = false);
 document.addEventListener('mouseleave', () => mouse.active = false);
 addEventListener('resize', resize);
 
 resize();
-(function loop(t) { step(); draw(t); requestAnimationFrame(loop); })(0);
+(function loop() { step(); draw(); requestAnimationFrame(loop); })();
 </script>
 </body>
 </html>
