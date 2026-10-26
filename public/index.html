@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shirokujaku</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; cursor: crosshair; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="A school of pixel fish that follows the cursor"></canvas>
+<script>
+const PX = 4; // screen pixels per art pixel
+const c = document.getElementById('c'), g = c.getContext('2d');
+let W, H, fish = [];
+const mouse = { x: -1e4, y: -1e4, active: false };
+
+function resize() {
+  W = c.width = Math.ceil(innerWidth / PX);
+  H = c.height = Math.ceil(innerHeight / PX);
+  const n = Math.min(600, Math.round(W * H / 120));
+  while (fish.length < n) fish.push(spawn());
+  fish.length = n;
+}
+
+function spawn() {
+  const a = Math.random() * Math.PI * 2;
+  return {
+    x: Math.random() * W, y: Math.random() * H,
+    vx: Math.cos(a), vy: Math.sin(a),
+    hue: 195 + Math.random() * 30,
+    sat: Math.random() < 0.4 ? 8 + Math.random() * 12 : 45 + Math.random() * 35, // silver or blue
+    len: 3 + (Math.random() * 3 | 0),
+  };
+}
+
+function step() {
+  // ponytail: O(n^2) neighbour scan, fine up to ~600 fish; add a spatial grid if the count grows
+  for (const f of fish) {
+    let ax = 0, ay = 0, cx = 0, cy = 0, sx = 0, sy = 0, n = 0;
+    for (const o of fish) {
+      if (o === f) continue;
+      const dx = o.x - f.x, dy = o.y - f.y, d2 = dx * dx + dy * dy;
+      if (d2 > 144) continue;
+      n++; ax += o.vx; ay += o.vy; cx += dx; cy += dy;
+      if (d2 < 9) { sx -= dx / (d2 + 0.1); sy -= dy / (d2 + 0.1); }
+    }
+    if (n) {
+      f.vx += (ax / n - f.vx) * 0.05 + cx / n * 0.004;
+      f.vy += (ay / n - f.vy) * 0.05 + cy / n * 0.004;
+    }
+    f.vx += sx * 0.15; f.vy += sy * 0.15;
+
+    if (mouse.active) {
+      const dx = mouse.x - f.x, dy = mouse.y - f.y, d = Math.hypot(dx, dy) + 0.01;
+      if (d < 14) { f.vx -= dx / d * 0.6; f.vy -= dy / d * 0.6; } // scatter near the cursor
+      else { f.vx += dx / d * 0.04; f.vy += dy / d * 0.04; }     // otherwise follow it
+    }
+
+    const s = Math.hypot(f.vx, f.vy), max = mouse.active ? 1.6 : 0.9, min = 0.35;
+    const k = s > max ? max / s : s < min ? min / s : 1;
+    f.vx *= k; f.vy *= k;
+    f.x = (f.x + f.vx + W) % W;
+    f.y = (f.y + f.vy + H) % H;
+  }
+}
+
+function draw(t) {
+  g.fillStyle = 'rgba(0,0,0,0.55)'; // short trails
+  g.fillRect(0, 0, W, H);
+  for (const f of fish) {
+    const s = Math.hypot(f.vx, f.vy), dx = f.vx / s, dy = f.vy / s;
+    // light catches the flank as the fish turns
+    const flash = 0.5 + 0.5 * Math.sin(Math.atan2(dy, dx) * 2 + t * 0.001);
+    for (let i = 0; i < f.len; i++) {
+      const l = 40 + flash * 45 - i * 6;
+      g.fillStyle = `hsl(${f.hue},${f.sat}%,${l}%)`;
+      g.fillRect(Math.round(f.x - dx * i), Math.round(f.y - dy * i), 1, 1);
+      if (i === 1 && f.len > 3) g.fillRect(Math.round(f.x - dx * i - dy), Math.round(f.y - dy * i + dx), 1, 1);
+    }
+  }
+}
+
+function setMouse(e) { mouse.x = e.clientX / PX; mouse.y = e.clientY / PX; mouse.active = true; }
+addEventListener('pointermove', setMouse);
+addEventListener('pointerdown', setMouse);
+addEventListener('pointerleave', () => mouse.active = false);
+document.addEventListener('mouseleave', () => mouse.active = false);
+addEventListener('resize', resize);
+
+resize();
+(function loop(t) { step(); draw(t); requestAnimationFrame(loop); })(0);
+</script>
+</body>
+</html>
